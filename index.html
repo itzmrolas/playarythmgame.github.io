@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3-Key Arrow Rhythm Game</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: #1a1a2e;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            width: 320px; /* Slimmed down width for 3 lanes */
+            height: 600px;
+            background-color: #162447;
+            border: 4px solid #0f4c81;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .lanes {
+            display: flex;
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        .lane {
+            flex: 1;
+            height: 100%;
+            border-right: 1px dashed rgba(255, 255, 255, 0.1);
+            position: relative;
+        }
+
+        .lane:last-child {
+            border-right: none;
+        }
+
+        #judgment-line {
+            position: absolute;
+            bottom: 50px;
+            width: 100%;
+            height: 10px;
+            background-color: #e43f5a;
+            box-shadow: 0 0 15px #e43f5a;
+            z-index: 10;
+        }
+
+        .keys-hints {
+            display: flex;
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 50px;
+            background-color: #1f4068;
+        }
+
+        .key-hint {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            font-size: 1.5rem;
+            border-right: 1px solid rgba(255, 255, 255, 0.2);
+            transition: background 0.1s;
+        }
+
+        .key-hint.active {
+            background-color: #00fff0;
+            color: #000;
+        }
+
+        .note {
+            position: absolute;
+            width: 80%;
+            left: 10%;
+            height: 20px;
+            background: linear-gradient(135deg, #00fff0, #0088ff);
+            border-radius: 5px;
+            box-shadow: 0 0 10px #00fff0;
+        }
+
+        .note.chord {
+            background: linear-gradient(135deg, #ffdd67, #ff8800);
+            box-shadow: 0 0 10px #ffdd67;
+        }
+
+        #ui {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        #score-board, #combo-board {
+            font-size: 1.5rem;
+            font-weight: bold;
+            display: inline-block;
+            margin: 0 15px;
+        }
+
+        #combo-board {
+            color: #ffdd67;
+        }
+
+        #rating, #pause-screen {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            font-weight: bold;
+            pointer-events: none;
+            z-index: 20;
+        }
+
+        #rating {
+            top: 40%;
+            font-size: 2rem;
+            text-transform: uppercase;
+            opacity: 0;
+            transition: opacity 0.1s;
+        }
+
+        #pause-screen {
+            top: 0;
+            left: 0;
+            height: 100%;
+            background-color: rgba(22, 36, 71, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 2.5rem;
+            color: #ffdd67;
+            display: none;
+        }
+
+        #pause-screen span {
+            font-size: 1rem;
+            color: #fff;
+            margin-top: 10px;
+        }
+
+        .perfect { color: #00fff0; text-shadow: 0 0 10px #00fff0; }
+        .good { color: #a2ff00; text-shadow: 0 0 10px #a2ff00; }
+        .miss { color: #ff4a4a; text-shadow: 0 0 10px #ff4a4a; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div id="score-board">Score: <span id="score">0</span></div>
+        <div id="combo-board">Combo: <span id="combo">0</span></div>
+    </div>
+
+    <div id="game-container">
+        <div id="pause-screen">PAUSED<span>Press ESC to Resume</span></div>
+        <div id="rating"></div>
+        <div id="judgment-line"></div>
+        
+        <div class="lanes">
+            <div class="lane" id="lane-0"></div>
+            <div class="lane" id="lane-1"></div>
+            <div class="lane" id="lane-2"></div>
+        </div>
+
+        <div class="keys-hints">
+            <div class="key-hint" id="key-0">←</div>
+            <div class="key-hint" id="key-1">↓</div>
+            <div class="key-hint" id="key-2">→</div>
+        </div>
+    </div>
+
+    <script>
+        const lanes = [
+            document.getElementById('lane-0'), 
+            document.getElementById('lane-1'), 
+            document.getElementById('lane-2')
+        ];
+        const keyElements = [
+            document.getElementById('key-0'), 
+            document.getElementById('key-1'), 
+            document.getElementById('key-2')
+        ];
+        
+        const scoreEl = document.getElementById('score');
+        const comboEl = document.getElementById('combo');
+        const ratingEl = document.getElementById('rating');
+        const pauseScreen = document.getElementById('pause-screen');
+
+        // Mapped exclusively to Left, Down, Right
+        const keyMap = { 
+            'arrowleft': 0, 
+            'arrowdown': 1, 
+            'arrowright': 2 
+        };
+        
+        let score = 0;
+        let combo = 0;
+        let isPaused = false;
+        let notes = [];
+        let gameInterval;
+        let lastSpawnTime = 0;
+        
+        // Configuration
+        const noteSpeed = 4;             
+        const judgmentLineY = 540;       
+        const hitWindowPerfect = 25;     
+        const hitWindowGood = 50;        
+        const spawnInterval = 650;       
+
+        // Web Audio Setup
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playHitSound(type) {
+            if (!audioCtx) return;
+            
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            if (type === 'perfect') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); 
+                osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.08); 
+                gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.12);
+            } else if (type === 'good') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(392.00, audioCtx.currentTime); 
+                gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'miss') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(120, audioCtx.currentTime); 
+                osc.frequency.linearRampToValueAtTime(60, audioCtx.currentTime + 0.15);
+                gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.15);
+            }
+        }
+
+        initGame();
+
+        function initGame() {
+            gameInterval = requestAnimationFrame(updateGame);
+        }
+
+        function updateGame(currentTime) {
+            if (isPaused) return;
+
+            if (!lastSpawnTime) lastSpawnTime = currentTime;
+            if (currentTime - lastSpawnTime > spawnInterval) {
+                if (Math.random() < 0.65) {
+                    const spawnChance = Math.random();
+                    if (spawnChance > 0.85) {
+                        // 15% chance to hit ALL 3 lanes at once
+                        spawnNote(0, true); spawnNote(1, true); spawnNote(2, true);
+                    } else if (spawnChance > 0.55) {
+                        // 30% chance for a double-note chord
+                        let lane1 = Math.floor(Math.random() * 3);
+                        let lane2 = Math.floor(Math.random() * 3);
+                        while (lane1 === lane2) lane2 = Math.floor(Math.random() * 3);
+                        spawnNote(lane1, true); spawnNote(lane2, true);
+                    } else {
+                        // Single note spawn
+                        spawnNote(Math.floor(Math.random() * 3), false);
+                    }
+                }
+                lastSpawnTime = currentTime;
+            }
+
+            for (let i = notes.length - 1; i >= 0; i--) {
+                let note = notes[i];
+                note.y += noteSpeed;
+                note.element.style.top = note.y + 'px';
+
+                if (note.y > judgmentLineY + hitWindowGood && !note.hit) {
+                    triggerMiss();
+                    note.element.remove();
+                    notes.splice(i, 1);
+                }
+            }
+
+            gameInterval = requestAnimationFrame(updateGame);
+        }
+
+        function spawnNote(laneIndex, isChord = false) {
+            const noteEl = document.createElement('div');
+            noteEl.classList.add('note');
+            if (isChord) noteEl.classList.add('chord');
+            noteEl.style.top = '0px';
+            lanes[laneIndex].appendChild(noteEl);
+
+            notes.push({
+                lane: laneIndex,
+                y: 0,
+                element: noteEl,
+                hit: false
+            });
+        }
+
+        window.addEventListener('keydown', (e) => {
+            initAudio();
+            const key = e.key.toLowerCase();
+
+            if (key === 'escape') {
+                togglePause();
+                return;
+            }
+
+            if (isPaused) return;
+
+            if (keyMap[key] !== undefined) {
+                e.preventDefault(); 
+                const laneIndex = keyMap[key];
+                
+                if (!keyElements[laneIndex].classList.contains('active')) {
+                    keyElements[laneIndex].classList.add('active');
+                    checkHit(laneIndex);
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (keyMap[key] !== undefined) {
+                const laneIndex = keyMap[key];
+                keyElements[laneIndex].classList.remove('active');
+            }
+        });
+
+        function togglePause() {
+            isPaused = !isPaused;
+            if (isPaused) {
+                pauseScreen.style.display = 'flex';
+                cancelAnimationFrame(gameInterval);
+            } else {
+                pauseScreen.style.display = 'none';
+                lastSpawnTime = 0; 
+                gameInterval = requestAnimationFrame(updateGame);
+            }
+        }
+
+        function checkHit(laneIndex) {
+            const targetNote = notes.find(note => note.lane === laneIndex && !note.hit);
+
+            if (targetNote) {
+                const distance = Math.abs(targetNote.y - judgmentLineY);
+
+                if (distance <= hitWindowPerfect) {
+                    processHit(targetNote, 'Perfect', 5);
+                } else if (distance <= hitWindowGood) {
+                    processHit(targetNote, 'Good', 1);
+                } else {
+                    triggerMiss();
+                }
+            } else {
+                triggerMiss();
+            }
+        }
+
+        function processHit(note, rating, points) {
+            note.hit = true;
+            score += points;
+            combo++;
+            scoreEl.textContent = score;
+            comboEl.textContent = combo;
+            showRating(rating);
+            playHitSound(rating.toLowerCase());
+            
+            note.element.remove();
+            notes = notes.filter(n => n !== note);
+        }
+
+        function triggerMiss() {
+            combo = 0;
+            comboEl.textContent = combo;
+            score = Math.max(0, score - 2); 
+            scoreEl.textContent = score;
+            showRating('Miss');
+            playHitSound('miss');
+        }
+
+        function showRating(status) {
+            ratingEl.textContent = status;
+            ratingEl.className = status.toLowerCase();
+            ratingEl.style.opacity = 1;
+            
+            setTimeout(() => {
+                if (ratingEl.textContent === status) {
+                    ratingEl.style.opacity = 0;
+                }
+            }, 300);
+        }
+    </script>
+</body>
+</html>
